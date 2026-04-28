@@ -14,8 +14,13 @@ st.markdown("""
 <style>
     html, body, [class*="css"] {
         direction: rtl;
-        text-align: right;
+        text-align: center;
         font-family: 'Segoe UI', sans-serif;
+    }
+    .block-container {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 2rem 1rem;
     }
     .stButton > button { width: 100%; border-radius: 10px; }
     .stProgress > div > div { border-radius: 10px; }
@@ -35,6 +40,13 @@ st.markdown("""
         border-radius: 8px;
         padding: 10px 14px;
         margin-bottom: 6px;
+        text-align: right;
+    }
+    .macro-bar-label {
+        font-size: 13px;
+        color: #374151;
+        text-align: right;
+        margin-bottom: 2px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -42,6 +54,9 @@ st.markdown("""
 # --- Session state init ---
 for key, default in [
     ("daily_goal", None),
+    ("carbs_goal", None),
+    ("fat_goal", None),
+    ("protein_goal", None),
     ("log", []),
     ("analysis_result", None),
     ("last_uploaded_name", None),
@@ -122,27 +137,47 @@ def get_meal_suggestions(remaining_calories: int) -> list:
 def total_consumed():
     return sum(item["calories"] for item in st.session_state.log)
 
+def total_macro(key):
+    return sum(item[key] for item in st.session_state.log)
 
-# ===== SCREEN 1: Set daily goal =====
+
+def macro_bar(label, consumed, goal, color):
+    pct = min(consumed / goal, 1.0) * 100 if goal else 0
+    over = consumed > goal
+    bar_color = "#ef4444" if over else color
+    st.markdown(f"""
+    <div class="macro-bar-label">{label}: {consumed}g / {goal}g</div>
+    <div style="background:#e5e7eb;border-radius:6px;height:10px;overflow:hidden;margin-bottom:10px;">
+        <div style="background:{bar_color};width:{pct:.1f}%;height:100%;border-radius:6px;"></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ===== SCREEN 1: Set daily goals =====
 if st.session_state.daily_goal is None:
     st.markdown("<br>", unsafe_allow_html=True)
     st.title("🍽️ מזהה קלוריות חכם")
     st.markdown("### ברוך הבא!")
     st.markdown("האפליקציה מזהה מזון מתמונה ומחשבת קלוריות, פחמימות, שומן וחלבון.")
     st.markdown("---")
-    st.markdown("#### מה היעד הקלורי היומי שלך?")
+    st.markdown("#### הגדר יעדים יומיים")
 
-    goal = st.number_input(
-        "קלוריות ליום",
-        min_value=800,
-        max_value=5000,
-        value=2000,
-        step=50,
-        help="ממוצע מומלץ: 2000 לנשים, 2500 לגברים"
-    )
+    goal = st.number_input("🔥 קלוריות ליום", min_value=800, max_value=5000, value=2000, step=50,
+                           help="ממוצע מומלץ: 2000 לנשים, 2500 לגברים")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        carbs_goal = st.number_input("🍞 פחמימות (גרם)", min_value=20, max_value=600, value=250, step=10)
+    with col2:
+        fat_goal = st.number_input("🥑 שומן (גרם)", min_value=10, max_value=300, value=70, step=5)
+    with col3:
+        protein_goal = st.number_input("💪 חלבון (גרם)", min_value=10, max_value=300, value=100, step=5)
+
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("✅ התחל לעקוב", type="primary"):
         st.session_state.daily_goal = goal
+        st.session_state.carbs_goal = carbs_goal
+        st.session_state.fat_goal = fat_goal
+        st.session_state.protein_goal = protein_goal
         st.rerun()
 
 
@@ -153,14 +188,12 @@ else:
     progress_pct = min(consumed / st.session_state.daily_goal, 1.0)
     over_limit = consumed > st.session_state.daily_goal
 
-    # Header
     st.title("🍽️ מזהה קלוריות חכם")
 
     # Daily summary bar
     col1, col2, col3 = st.columns(3)
     col1.metric("🎯 יעד יומי", f"{st.session_state.daily_goal:,} קל׳")
     col2.metric("🔥 נצרך", f"{consumed:,} קל׳")
-    delta_color = "inverse" if over_limit else "normal"
     col3.metric(
         "✅ נשאר" if not over_limit else "⚠️ חריגה",
         f"{remaining:,} קל׳" if not over_limit else f"{consumed - st.session_state.daily_goal:,} קל׳",
@@ -172,8 +205,14 @@ else:
     <div style="background:#e5e7eb;border-radius:8px;height:14px;overflow:hidden;margin-bottom:4px;">
         <div style="background:{bar_color};width:{progress_pct*100:.1f}%;height:100%;border-radius:8px;transition:width 0.4s;"></div>
     </div>
-    <div style="text-align:left;font-size:12px;color:#9ca3af;">{progress_pct*100:.0f}% מהיעד היומי</div>
+    <div style="text-align:center;font-size:12px;color:#9ca3af;">{progress_pct*100:.0f}% מהיעד הקלורי היומי</div>
     """, unsafe_allow_html=True)
+
+    # Macro progress bars
+    st.markdown("<br>", unsafe_allow_html=True)
+    macro_bar("🍞 פחמימות", total_macro("carbs"), st.session_state.carbs_goal, "#3b82f6")
+    macro_bar("🥑 שומן", total_macro("fat"), st.session_state.fat_goal, "#f59e0b")
+    macro_bar("💪 חלבון", total_macro("protein"), st.session_state.protein_goal, "#8b5cf6")
 
     st.markdown("---")
 
@@ -182,7 +221,6 @@ else:
     uploaded = st.file_uploader("בחר תמונה (JPG, PNG, WEBP)", type=["jpg", "jpeg", "png", "webp"])
 
     if uploaded:
-        # Clear previous result when new image is uploaded
         if uploaded.name != st.session_state.last_uploaded_name:
             st.session_state.analysis_result = None
             st.session_state.last_uploaded_name = uploaded.name
@@ -212,7 +250,6 @@ else:
             if result.get("confidence") != "high":
                 st.caption(f"{conf_icon} {conf_text} - ההערכה עשויה להשתנות בהתאם לגודל המנה בפועל")
 
-            # Nutrition grid
             c1, c2, c3, c4 = st.columns(4)
             with c1:
                 st.markdown(f"""<div class="nutrition-box">
@@ -295,5 +332,6 @@ else:
     if st.button("🔄 איפוס - יום חדש"):
         for key in ["log", "analysis_result", "last_uploaded_name"]:
             st.session_state[key] = [] if key == "log" else None
-        st.session_state.daily_goal = None
+        for key in ["daily_goal", "carbs_goal", "fat_goal", "protein_goal"]:
+            st.session_state[key] = None
         st.rerun()
