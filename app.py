@@ -3,6 +3,9 @@ import anthropic
 import base64
 import json
 import re
+import csv
+import io
+from datetime import datetime
 
 st.set_page_config(
     page_title="מזהה קלוריות חכם",
@@ -142,6 +145,23 @@ def get_meal_suggestions(remaining_calories: int) -> list:
 def total_consumed():
     return sum(item["calories"] for item in st.session_state.log)
 
+
+def build_csv() -> bytes:
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["date", "time", "name", "calories", "carbs", "fat", "protein"])
+    writer.writeheader()
+    for item in st.session_state.log:
+        writer.writerow({
+            "date": item.get("date", ""),
+            "time": item.get("time", ""),
+            "name": item["name"],
+            "calories": item["calories"],
+            "carbs": item["carbs"],
+            "fat": item["fat"],
+            "protein": item["protein"],
+        })
+    return output.getvalue().encode("utf-8-sig")
+
 def total_macro(key):
     return sum(item[key] for item in st.session_state.log)
 
@@ -280,6 +300,8 @@ else:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("➕ הוסף ליומן האכילה", type="secondary"):
                 st.session_state.log.append({
+                    "date": datetime.now().strftime("%Y-%m-%d"),
+                    "time": datetime.now().strftime("%H:%M"),
                     "name": result["name"],
                     "calories": result["calories"],
                     "carbs": result["carbs"],
@@ -296,11 +318,21 @@ else:
     # ---- Food log ----
     if st.session_state.log:
         st.subheader("📋 יומן אכילה")
+        col_dl, _ = st.columns([2, 3])
+        with col_dl:
+            st.download_button(
+                label="⬇️ הורד יומן CSV",
+                data=build_csv(),
+                file_name=f"יומן_אכילה_{datetime.now().strftime('%Y-%m-%d')}.csv",
+                mime="text/csv",
+            )
         for i, item in enumerate(st.session_state.log):
             col_a, col_b = st.columns([5, 1])
             with col_a:
+                date_str = f"{item.get('date','')} {item.get('time','')}".strip()
                 st.markdown(
                     f"""<div class="log-item">
+                        <span style="font-size:11px;color:#9ca3af;">{date_str}</span><br>
                         <b>{item['name']}</b> &nbsp;|&nbsp;
                         {item['calories']} קל׳ &nbsp;|&nbsp;
                         פחמ׳ {item['carbs']}g &nbsp;|&nbsp;
