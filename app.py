@@ -14,14 +14,17 @@ st.markdown("""
 <style>
     html, body, [class*="css"] {
         direction: rtl;
-        text-align: center;
         font-family: 'Segoe UI', sans-serif;
     }
     .block-container {
         max-width: 760px;
-        margin: 0 auto;
+        margin: 0 auto !important;
         padding: 2rem 1rem;
     }
+    h1, h2, h3, h4, h5 { text-align: center !important; }
+    p, label, .stCaption, [data-testid="stCaptionContainer"] p,
+    [data-testid="stMarkdownContainer"] p { text-align: center !important; }
+    .stButton { display: flex; justify-content: center; }
     .stButton > button { width: 100%; border-radius: 10px; }
     .stProgress > div > div { border-radius: 10px; }
     .nutrition-box {
@@ -48,6 +51,8 @@ st.markdown("""
         text-align: right;
         margin-bottom: 2px;
     }
+    [data-testid="metric-container"] { text-align: center !important; }
+    [data-testid="stFileUploaderDropzone"] { direction: rtl; }
 </style>
 """, unsafe_allow_html=True)
 
