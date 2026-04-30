@@ -5,7 +5,8 @@ import json
 import re
 import csv
 import io
-from datetime import datetime
+from datetime import datetime, date
+from supabase import create_client
 
 st.set_page_config(
     page_title="מזהה קלוריות חכם",
@@ -29,7 +30,6 @@ st.markdown("""
     [data-testid="stMarkdownContainer"] p { text-align: center !important; }
     .stButton { display: flex; justify-content: center; }
     .stButton > button { width: 100%; border-radius: 10px; }
-    .stProgress > div > div { border-radius: 10px; }
     .nutrition-box {
         background: #f7f9fc;
         border-radius: 12px;
@@ -55,12 +55,12 @@ st.markdown("""
         margin-bottom: 2px;
     }
     [data-testid="metric-container"] { text-align: center !important; }
-    [data-testid="stFileUploaderDropzone"] { direction: rtl; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- Session state init ---
+# --- Session state ---
 for key, default in [
+    ("user_email", None),
     ("daily_goal", None),
     ("carbs_goal", None),
     ("fat_goal", None),
@@ -73,6 +73,81 @@ for key, default in [
         st.session_state[key] = default
 
 
+# --- Supabase ---
+@st.cache_resource
+def get_supabase():
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+
+
+def load_settings(email: str):
+    sb = get_supabase()
+    res = sb.table("user_settings").select("*").eq("user_email", email).execute()
+    return res.data[0] if res.data else None
+
+
+def save_settings(email, daily_goal, carbs_goal, fat_goal, protein_goal):
+    sb = get_supabase()
+    sb.table("user_settings").upsert({
+        "user_email": email,
+        "daily_goal": daily_goal,
+        "carbs_goal": carbs_goal,
+        "fat_goal": fat_goal,
+        "protein_goal": protein_goal,
+    }).execute()
+
+
+def load_today_log(email: str):
+    sb = get_supabase()
+    today = date.today().isoformat()
+    res = (sb.table("food_log")
+           .select("*")
+           .eq("user_email", email)
+           .eq("log_date", today)
+           .order("id")
+           .execute())
+    return [{
+        "id": r["id"],
+        "date": r["log_date"],
+        "time": r["log_time"] or "",
+        "name": r["food_name"],
+        "calories": r["calories"],
+        "carbs": r["carbs"],
+        "fat": r["fat"],
+        "protein": r["protein"],
+    } for r in res.data]
+
+
+def load_all_log(email: str):
+    sb = get_supabase()
+    res = (sb.table("food_log")
+           .select("*")
+           .eq("user_email", email)
+           .order("id")
+           .execute())
+    return res.data
+
+
+def add_food_entry(email: str, item: dict) -> int:
+    sb = get_supabase()
+    res = sb.table("food_log").insert({
+        "user_email": email,
+        "log_date": item["date"],
+        "log_time": item["time"],
+        "food_name": item["name"],
+        "calories": item["calories"],
+        "carbs": item["carbs"],
+        "fat": item["fat"],
+        "protein": item["protein"],
+    }).execute()
+    return res.data[0]["id"]
+
+
+def delete_food_entry(entry_id: int):
+    sb = get_supabase()
+    sb.table("food_log").delete().eq("id", entry_id).execute()
+
+
+# --- Helpers ---
 def get_media_type(filename: str) -> str:
     ext = filename.lower().rsplit(".", 1)[-1]
     return {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
@@ -82,7 +157,6 @@ def get_media_type(filename: str) -> str:
 def analyze_food_image(image_bytes: bytes, media_type: str) -> dict:
     client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
     image_b64 = base64.standard_b64encode(image_bytes).decode()
-
     prompt = """אתה מומחה תזונה. זהה את המזון בתמונה והחזר הערכת ערכים תזונתיים.
 
 החזר JSON בלבד, בלי טקסט נוסף, בפורמט הבא:
@@ -97,19 +171,14 @@ def analyze_food_image(image_bytes: bytes, media_type: str) -> dict:
 }
 
 אם לא ניתן לזהות מזון בתמונה, החזר: {"error": "לא זוהה מזון בתמונה"}"""
-
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=512,
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": image_b64}},
-                {"type": "text", "text": prompt}
-            ]
-        }]
+        messages=[{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": image_b64}},
+            {"type": "text", "text": prompt}
+        ]}]
     )
-
     text = response.content[0].text.strip()
     match = re.search(r'\{.*\}', text, re.DOTALL)
     if match:
@@ -128,13 +197,11 @@ def get_meal_suggestions(remaining_calories: int) -> list:
   {{"name": "...", "calories": <מספר>, "description": "..."}},
   {{"name": "...", "calories": <מספר>, "description": "..."}}
 ]"""
-
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=600,
         messages=[{"role": "user", "content": prompt}]
     )
-
     text = response.content[0].text.strip()
     match = re.search(r'\[.*\]', text, re.DOTALL)
     if match:
@@ -146,30 +213,13 @@ def total_consumed():
     return sum(item["calories"] for item in st.session_state.log)
 
 
-def build_csv() -> bytes:
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=["date", "time", "name", "calories", "carbs", "fat", "protein"])
-    writer.writeheader()
-    for item in st.session_state.log:
-        writer.writerow({
-            "date": item.get("date", ""),
-            "time": item.get("time", ""),
-            "name": item["name"],
-            "calories": item["calories"],
-            "carbs": item["carbs"],
-            "fat": item["fat"],
-            "protein": item["protein"],
-        })
-    return output.getvalue().encode("utf-8-sig")
-
 def total_macro(key):
     return sum(item[key] for item in st.session_state.log)
 
 
 def macro_bar(label, consumed, goal, color):
     pct = min(consumed / goal, 1.0) * 100 if goal else 0
-    over = consumed > goal
-    bar_color = "#ef4444" if over else color
+    bar_color = "#ef4444" if consumed > goal else color
     st.markdown(f"""
     <div class="macro-bar-label">{label}: {consumed}g / {goal}g</div>
     <div style="background:#e5e7eb;border-radius:6px;height:10px;overflow:hidden;margin-bottom:10px;">
@@ -178,17 +228,64 @@ def macro_bar(label, consumed, goal, color):
     """, unsafe_allow_html=True)
 
 
-# ===== SCREEN 1: Set daily goals =====
-if st.session_state.daily_goal is None:
+def build_csv_all() -> bytes:
+    rows = load_all_log(st.session_state.user_email)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["date", "time", "name", "calories", "carbs", "fat", "protein"])
+    writer.writeheader()
+    for r in rows:
+        writer.writerow({
+            "date": r["log_date"],
+            "time": r["log_time"] or "",
+            "name": r["food_name"],
+            "calories": r["calories"],
+            "carbs": r["carbs"],
+            "fat": r["fat"],
+            "protein": r["protein"],
+        })
+    return output.getvalue().encode("utf-8-sig")
+
+
+# ===== SCREEN 0: LOGIN =====
+if st.session_state.user_email is None:
     st.markdown("<br>", unsafe_allow_html=True)
     st.title("🍽️ מזהה קלוריות חכם")
-    st.markdown("### ברוך הבא!")
-    st.markdown("האפליקציה מזהה מזון מתמונה ומחשבת קלוריות, פחמימות, שומן וחלבון.")
+    st.markdown("### התחברות")
     st.markdown("---")
-    st.markdown("#### הגדר יעדים יומיים")
+    email_input = st.text_input("📧 אימייל")
+    password_input = st.text_input("🔑 סיסמה", type="password")
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    goal = st.number_input("🔥 קלוריות ליום", min_value=800, max_value=5000, value=2000, step=50,
-                           help="ממוצע מומלץ: 2000 לנשים, 2500 לגברים")
+    if st.button("✅ התחבר", type="primary"):
+        try:
+            users = json.loads(st.secrets["USERS"])
+        except Exception:
+            users = {}
+
+        if users.get(email_input) == password_input and password_input:
+            st.session_state.user_email = email_input
+            settings = load_settings(email_input)
+            if settings:
+                st.session_state.daily_goal = settings["daily_goal"]
+                st.session_state.carbs_goal = settings["carbs_goal"]
+                st.session_state.fat_goal = settings["fat_goal"]
+                st.session_state.protein_goal = settings["protein_goal"]
+            st.session_state.log = load_today_log(email_input)
+            st.rerun()
+        else:
+            st.error("אימייל או סיסמה שגויים")
+    st.stop()
+
+
+# ===== SCREEN 1: SET GOALS =====
+elif st.session_state.daily_goal is None:
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.title("🍽️ מזהה קלוריות חכם")
+    st.markdown(f"### ברוך הבא!")
+    st.markdown("#### הגדר יעדים יומיים")
+    st.markdown("---")
+
+    goal = st.number_input("🔥 קלוריות ליום", min_value=800, max_value=5000, value=2000, step=50)
     col1, col2, col3 = st.columns(3)
     with col1:
         carbs_goal = st.number_input("🍞 פחמימות (גרם)", min_value=20, max_value=600, value=250, step=10)
@@ -203,19 +300,30 @@ if st.session_state.daily_goal is None:
         st.session_state.carbs_goal = carbs_goal
         st.session_state.fat_goal = fat_goal
         st.session_state.protein_goal = protein_goal
+        save_settings(st.session_state.user_email, goal, carbs_goal, fat_goal, protein_goal)
         st.rerun()
 
 
-# ===== SCREEN 2: Main app =====
+# ===== SCREEN 2: MAIN APP =====
 else:
     consumed = total_consumed()
     remaining = max(0, st.session_state.daily_goal - consumed)
     progress_pct = min(consumed / st.session_state.daily_goal, 1.0)
     over_limit = consumed > st.session_state.daily_goal
 
-    st.title("🍽️ מזהה קלוריות חכם")
+    # Header + logout
+    col_title, col_logout = st.columns([4, 1])
+    with col_title:
+        st.title("🍽️ מזהה קלוריות חכם")
+    with col_logout:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("יציאה"):
+            for key in ["user_email", "daily_goal", "carbs_goal", "fat_goal",
+                        "protein_goal", "log", "analysis_result", "last_uploaded_name"]:
+                st.session_state[key] = [] if key == "log" else None
+            st.rerun()
 
-    # Daily summary bar
+    # Daily summary
     col1, col2, col3 = st.columns(3)
     col1.metric("🎯 יעד יומי", f"{st.session_state.daily_goal:,} קל׳")
     col2.metric("🔥 נצרך", f"{consumed:,} קל׳")
@@ -228,12 +336,11 @@ else:
     bar_color = "#ef4444" if over_limit else "#22c55e" if progress_pct < 0.85 else "#f59e0b"
     st.markdown(f"""
     <div style="background:#e5e7eb;border-radius:8px;height:14px;overflow:hidden;margin-bottom:4px;">
-        <div style="background:{bar_color};width:{progress_pct*100:.1f}%;height:100%;border-radius:8px;transition:width 0.4s;"></div>
+        <div style="background:{bar_color};width:{progress_pct*100:.1f}%;height:100%;border-radius:8px;"></div>
     </div>
     <div style="text-align:center;font-size:12px;color:#9ca3af;">{progress_pct*100:.0f}% מהיעד הקלורי היומי</div>
     """, unsafe_allow_html=True)
 
-    # Macro progress bars
     st.markdown("<br>", unsafe_allow_html=True)
     macro_bar("🍞 פחמימות", total_macro("carbs"), st.session_state.carbs_goal, "#3b82f6")
     macro_bar("🥑 שומן", total_macro("fat"), st.session_state.fat_goal, "#f59e0b")
@@ -241,7 +348,7 @@ else:
 
     st.markdown("---")
 
-    # ---- Image upload & analysis ----
+    # Image upload
     st.subheader("📸 העלה תמונת מזון")
     uploaded = st.file_uploader("בחר תמונה (JPG, PNG, WEBP)", type=["jpg", "jpeg", "png", "webp"])
 
@@ -249,28 +356,24 @@ else:
         if uploaded.name != st.session_state.last_uploaded_name:
             st.session_state.analysis_result = None
             st.session_state.last_uploaded_name = uploaded.name
-
         st.image(uploaded, use_column_width=True)
-
         if st.button("🔍 זהה וחשב קלוריות", type="primary"):
             image_bytes = uploaded.read()
             media_type = get_media_type(uploaded.name)
-            with st.spinner("מנתח את המזון... "):
+            with st.spinner("מנתח את המזון..."):
                 try:
                     st.session_state.analysis_result = analyze_food_image(image_bytes, media_type)
                 except Exception as e:
                     st.session_state.analysis_result = {"error": f"שגיאה: {e}"}
 
-    # ---- Analysis result ----
+    # Analysis result
     if st.session_state.analysis_result:
         result = st.session_state.analysis_result
-
         if "error" in result:
             st.error(result["error"])
         else:
             confidence_labels = {"high": ("✅", "ביטחון גבוה"), "medium": ("🟡", "ביטחון בינוני"), "low": ("⚠️", "ביטחון נמוך")}
             conf_icon, conf_text = confidence_labels.get(result.get("confidence", "medium"), ("🟡", ""))
-
             st.success(f"**{result['name']}** - {result.get('serving_description', '')}")
             if result.get("confidence") != "high":
                 st.caption(f"{conf_icon} {conf_text} - ההערכה עשויה להשתנות בהתאם לגודל המנה בפועל")
@@ -299,15 +402,19 @@ else:
 
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("➕ הוסף ליומן האכילה", type="secondary"):
-                st.session_state.log.append({
-                    "date": datetime.now().strftime("%Y-%m-%d"),
-                    "time": datetime.now().strftime("%H:%M"),
+                now = datetime.now()
+                item = {
+                    "date": now.strftime("%Y-%m-%d"),
+                    "time": now.strftime("%H:%M"),
                     "name": result["name"],
                     "calories": result["calories"],
                     "carbs": result["carbs"],
                     "fat": result["fat"],
                     "protein": result["protein"],
-                })
+                }
+                entry_id = add_food_entry(st.session_state.user_email, item)
+                item["id"] = entry_id
+                st.session_state.log.append(item)
                 st.session_state.analysis_result = None
                 st.session_state.last_uploaded_name = None
                 st.success("נוסף ליומן!")
@@ -315,24 +422,23 @@ else:
 
     st.markdown("---")
 
-    # ---- Food log ----
+    # Food log
     if st.session_state.log:
-        st.subheader("📋 יומן אכילה")
+        st.subheader("📋 יומן אכילה - היום")
         col_dl, _ = st.columns([2, 3])
         with col_dl:
             st.download_button(
-                label="⬇️ הורד יומן CSV",
-                data=build_csv(),
+                label="⬇️ הורד כל ההיסטוריה (CSV)",
+                data=build_csv_all(),
                 file_name=f"יומן_אכילה_{datetime.now().strftime('%Y-%m-%d')}.csv",
                 mime="text/csv",
             )
         for i, item in enumerate(st.session_state.log):
             col_a, col_b = st.columns([5, 1])
             with col_a:
-                date_str = f"{item.get('date','')} {item.get('time','')}".strip()
                 st.markdown(
                     f"""<div class="log-item">
-                        <span style="font-size:11px;color:#9ca3af;">{date_str}</span><br>
+                        <span style="font-size:11px;color:#9ca3af;">{item.get('date','')} {item.get('time','')}</span><br>
                         <b>{item['name']}</b> &nbsp;|&nbsp;
                         {item['calories']} קל׳ &nbsp;|&nbsp;
                         פחמ׳ {item['carbs']}g &nbsp;|&nbsp;
@@ -343,16 +449,17 @@ else:
                 )
             with col_b:
                 if st.button("🗑️", key=f"del_{i}", help="הסר מהיומן"):
+                    if "id" in item:
+                        delete_food_entry(item["id"])
                     st.session_state.log.pop(i)
                     st.rerun()
         st.markdown("---")
 
-    # ---- Meal suggestions ----
+    # Meal suggestions
     remaining_for_suggestions = st.session_state.daily_goal - consumed
     if remaining_for_suggestions >= 150:
         st.subheader("💡 המלצות ארוחה לפי יתרת הקלוריות")
         st.caption(f"נשארו לך {remaining_for_suggestions:,} קלוריות להיום")
-
         if st.button("🎯 הצע ארוחות מתאימות"):
             with st.spinner("מחפש המלצות בשבילך..."):
                 try:
@@ -366,9 +473,8 @@ else:
         st.info("✅ הגעת ליעד הקלורי היומי שלך!")
 
     st.markdown("---")
-    if st.button("🔄 איפוס - יום חדש"):
-        for key in ["log", "analysis_result", "last_uploaded_name"]:
-            st.session_state[key] = [] if key == "log" else None
+    if st.button("🔄 איפוס יעדים - יום חדש"):
         for key in ["daily_goal", "carbs_goal", "fat_goal", "protein_goal"]:
             st.session_state[key] = None
+        st.session_state.log = []
         st.rerun()
