@@ -156,13 +156,18 @@ def get_media_type(filename: str) -> str:
             "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/jpeg")
 
 
-def analyze_food_image(image_bytes: bytes, media_type: str) -> dict:
+def analyze_food_image(image_bytes: bytes, media_type: str, description: str = "") -> dict:
     client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
     image_b64 = base64.standard_b64encode(image_bytes).decode()
-    prompt = """אתה מומחה תזונה. זהה את המזון בתמונה והחזר הערכת ערכים תזונתיים.
+
+    description_note = ""
+    if description.strip():
+        description_note = f"\n\nהמשתמש הוסיף את התיאור הבא שיש לקחת בחשבון:\n\"{description.strip()}\""
+
+    prompt = f"""אתה מומחה תזונה. זהה את המזון בתמונה והחזר הערכת ערכים תזונתיים.{description_note}
 
 החזר JSON בלבד, בלי טקסט נוסף, בפורמט הבא:
-{
+{{
   "name": "שם המזון בעברית",
   "serving_description": "תיאור המנה (למשל: 100 גרם / כוס אחת / ביצה אחת)",
   "calories": <מספר שלם>,
@@ -170,9 +175,9 @@ def analyze_food_image(image_bytes: bytes, media_type: str) -> dict:
   "fat": <גרם שומן, מספר שלם>,
   "protein": <גרם חלבון, מספר שלם>,
   "confidence": "high/medium/low"
-}
+}}
 
-אם לא ניתן לזהות מזון בתמונה, החזר: {"error": "לא זוהה מזון בתמונה"}"""
+אם לא ניתן לזהות מזון בתמונה, החזר: {{"error": "לא זוהה מזון בתמונה"}}"""
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=512,
@@ -365,12 +370,18 @@ else:
             st.session_state.analysis_result = None
             st.session_state.last_uploaded_name = uploaded.name
         st.image(uploaded, use_column_width=True)
+        food_description = st.text_area(
+            "📝 תיאור נוסף (אופציונלי)",
+            placeholder="למשל: שניצל עוף מטוגן עם תוספת שמן, מנה גדולה של כ-300 גרם...",
+            height=80,
+            help="הוסף פרטים שיעזרו לזהות את האוכל בדיוק רב יותר"
+        )
         if st.button("🔍 זהה וחשב קלוריות", type="primary"):
             image_bytes = uploaded.read()
             media_type = get_media_type(uploaded.name)
             with st.spinner("מנתח את המזון..."):
                 try:
-                    st.session_state.analysis_result = analyze_food_image(image_bytes, media_type)
+                    st.session_state.analysis_result = analyze_food_image(image_bytes, media_type, food_description)
                 except Exception as e:
                     st.session_state.analysis_result = {"error": f"שגיאה: {e}"}
 
