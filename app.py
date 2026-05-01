@@ -75,7 +75,7 @@ for key, default in [
 
 # --- Supabase via REST ---
 def sb_headers():
-    key = st.secrets["SUPABASE_KEY"]
+    key = st.secrets["SUPABASE_KEY"].replace("\n", "").replace(" ", "").strip()
     return {
         "apikey": key,
         "Authorization": f"Bearer {key}",
