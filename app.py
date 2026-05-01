@@ -267,6 +267,8 @@ if st.session_state.user_email is None:
             st.error(f"Secrets error: {ex}")
             st.stop()
 
+        st.caption(f"Debug: expecting [{valid_email}] / [{valid_pass}]")
+        st.caption(f"Debug: got [{email_input.strip()}] / [{password_input.strip()}]")
         if email_input.strip() == valid_email and password_input.strip() == valid_pass:
             st.session_state.user_email = email_input.strip()
             settings = load_settings(email_input)
