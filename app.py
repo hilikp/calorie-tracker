@@ -254,9 +254,9 @@ if st.session_state.user_email is None:
     st.title("🍽️ מזהה קלוריות חכם")
     st.markdown("### התחברות")
     st.markdown("---")
-    email_input = st.text_input("📧 אימייל", placeholder="your@email.com")
-    password_input = st.text_input("🔑 סיסמה", type="password", placeholder="password")
-    st.markdown('<style>input[type="text"], input[type="password"] { direction: ltr !important; text-align: left !important; }</style>', unsafe_allow_html=True)
+    st.markdown('<style>input { direction: ltr !important; text-align: left !important; }</style>', unsafe_allow_html=True)
+    email_input = st.text_input("📧 Email", placeholder="your@email.com", key="login_email", label_visibility="visible")
+    password_input = st.text_input("🔑 Password", type="password", placeholder="password", key="login_pass", label_visibility="visible")
     st.markdown("<br>", unsafe_allow_html=True)
 
     if st.button("✅ התחבר", type="primary"):
