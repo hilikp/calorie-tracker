@@ -5,8 +5,8 @@ import json
 import re
 import csv
 import io
+import requests
 from datetime import datetime, date
-from supabase import create_client
 
 st.set_page_config(
     page_title="מזהה קלוריות חכם",
@@ -73,63 +73,64 @@ for key, default in [
         st.session_state[key] = default
 
 
-# --- Supabase ---
-@st.cache_resource
-def get_supabase():
-    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+# --- Supabase via REST ---
+def sb_headers():
+    key = st.secrets["SUPABASE_KEY"]
+    return {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+
+def sb_url(table):
+    return f"{st.secrets['SUPABASE_URL']}/rest/v1/{table}"
 
 
 def load_settings(email: str):
-    sb = get_supabase()
-    res = sb.table("user_settings").select("*").eq("user_email", email).execute()
-    return res.data[0] if res.data else None
+    r = requests.get(sb_url("user_settings"), headers=sb_headers(),
+                     params={"user_email": f"eq.{email}", "select": "*"})
+    data = r.json()
+    return data[0] if data else None
 
 
 def save_settings(email, daily_goal, carbs_goal, fat_goal, protein_goal):
-    sb = get_supabase()
-    sb.table("user_settings").upsert({
+    payload = {
         "user_email": email,
         "daily_goal": daily_goal,
         "carbs_goal": carbs_goal,
         "fat_goal": fat_goal,
         "protein_goal": protein_goal,
-    }).execute()
+    }
+    h = {**sb_headers(), "Prefer": "resolution=merge-duplicates,return=representation"}
+    requests.post(sb_url("user_settings"), headers=h, json=payload)
 
 
 def load_today_log(email: str):
-    sb = get_supabase()
     today = date.today().isoformat()
-    res = (sb.table("food_log")
-           .select("*")
-           .eq("user_email", email)
-           .eq("log_date", today)
-           .order("id")
-           .execute())
+    r = requests.get(sb_url("food_log"), headers=sb_headers(),
+                     params={"user_email": f"eq.{email}", "log_date": f"eq.{today}",
+                             "select": "*", "order": "id"})
     return [{
-        "id": r["id"],
-        "date": r["log_date"],
-        "time": r["log_time"] or "",
-        "name": r["food_name"],
-        "calories": r["calories"],
-        "carbs": r["carbs"],
-        "fat": r["fat"],
-        "protein": r["protein"],
-    } for r in res.data]
+        "id": row["id"],
+        "date": row["log_date"],
+        "time": row["log_time"] or "",
+        "name": row["food_name"],
+        "calories": row["calories"],
+        "carbs": row["carbs"],
+        "fat": row["fat"],
+        "protein": row["protein"],
+    } for row in r.json()]
 
 
 def load_all_log(email: str):
-    sb = get_supabase()
-    res = (sb.table("food_log")
-           .select("*")
-           .eq("user_email", email)
-           .order("id")
-           .execute())
-    return res.data
+    r = requests.get(sb_url("food_log"), headers=sb_headers(),
+                     params={"user_email": f"eq.{email}", "select": "*", "order": "id"})
+    return r.json()
 
 
 def add_food_entry(email: str, item: dict) -> int:
-    sb = get_supabase()
-    res = sb.table("food_log").insert({
+    payload = {
         "user_email": email,
         "log_date": item["date"],
         "log_time": item["time"],
@@ -138,13 +139,14 @@ def add_food_entry(email: str, item: dict) -> int:
         "carbs": item["carbs"],
         "fat": item["fat"],
         "protein": item["protein"],
-    }).execute()
-    return res.data[0]["id"]
+    }
+    r = requests.post(sb_url("food_log"), headers=sb_headers(), json=payload)
+    return r.json()[0]["id"]
 
 
 def delete_food_entry(entry_id: int):
-    sb = get_supabase()
-    sb.table("food_log").delete().eq("id", entry_id).execute()
+    requests.delete(sb_url("food_log"), headers=sb_headers(),
+                    params={"id": f"eq.{entry_id}"})
 
 
 # --- Helpers ---
