@@ -259,14 +259,17 @@ if st.session_state.user_email is None:
     st.markdown("<br>", unsafe_allow_html=True)
 
     if st.button("✅ התחבר", type="primary"):
-        allowed = {}
-        for i in range(1, 6):
-            e = st.secrets.get(f"USER{i}_EMAIL", "")
-            p = st.secrets.get(f"USER{i}_PASSWORD", "")
-            if e:
-                allowed[e.strip()] = p.strip()
+        try:
+            valid_email = st.secrets["USER1_EMAIL"].strip()
+            valid_pass = st.secrets["USER1_PASSWORD"].strip()
+        except Exception as ex:
+            st.error(f"Secrets error: {ex}")
+            st.stop()
 
-        if allowed.get(email_input.strip()) == password_input.strip() and password_input:
+        st.caption(f"Debug: expecting [{valid_email}] / [{valid_pass}]")
+        st.caption(f"Debug: got [{email_input.strip()}] / [{password_input.strip()}]")
+
+        if email_input.strip() == valid_email and password_input.strip() == valid_pass:
             st.session_state.user_email = email_input.strip()
             settings = load_settings(email_input)
             if settings:
