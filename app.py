@@ -259,14 +259,13 @@ if st.session_state.user_email is None:
     st.title("🍽️ מזהה קלוריות חכם")
     st.markdown("### התחברות")
     st.markdown("---")
-    st.markdown('<style>input { direction: ltr !important; text-align: left !important; }</style>', unsafe_allow_html=True)
-    email_input = st.text_input("📧 Email", placeholder="your@email.com", key="login_email", label_visibility="visible")
-    password_input = st.text_input("🔑 Password", type="password", placeholder="password", key="login_pass", label_visibility="visible")
+    email_input = st.text_input("👤 שם משתמש", placeholder="הכנס שם משתמש", key="login_email")
+    password_input = st.text_input("🔑 סיסמה", type="password", placeholder="הכנס סיסמה", key="login_pass")
     st.markdown("<br>", unsafe_allow_html=True)
 
     if st.button("✅ התחבר", type="primary"):
         try:
-            valid_email = st.secrets["USER1_EMAIL"].strip()
+            valid_email = st.secrets["USER1_NAME"].strip()
             valid_pass = st.secrets["USER1_PASSWORD"].strip()
         except Exception as ex:
             st.error(f"Secrets error: {ex}")
