@@ -267,17 +267,18 @@ if st.session_state.user_email is None:
             st.error(f"Secrets error: {ex}")
             st.stop()
 
-        st.caption(f"Debug: expecting [{valid_email}] / [{valid_pass}]")
-        st.caption(f"Debug: got [{email_input.strip()}] / [{password_input.strip()}]")
         if email_input.strip() == valid_email and password_input.strip() == valid_pass:
             st.session_state.user_email = email_input.strip()
-            settings = load_settings(email_input)
-            if settings:
-                st.session_state.daily_goal = settings["daily_goal"]
-                st.session_state.carbs_goal = settings["carbs_goal"]
-                st.session_state.fat_goal = settings["fat_goal"]
-                st.session_state.protein_goal = settings["protein_goal"]
-            st.session_state.log = load_today_log(email_input)
+            try:
+                settings = load_settings(email_input.strip())
+                if settings:
+                    st.session_state.daily_goal = settings["daily_goal"]
+                    st.session_state.carbs_goal = settings["carbs_goal"]
+                    st.session_state.fat_goal = settings["fat_goal"]
+                    st.session_state.protein_goal = settings["protein_goal"]
+                st.session_state.log = load_today_log(email_input.strip())
+            except Exception as e:
+                st.warning(f"לא ניתן לטעון נתונים: {e}")
             st.rerun()
         else:
             st.error("אימייל או סיסמה שגויים")
@@ -381,50 +382,46 @@ else:
         else:
             confidence_labels = {"high": ("✅", "ביטחון גבוה"), "medium": ("🟡", "ביטחון בינוני"), "low": ("⚠️", "ביטחון נמוך")}
             conf_icon, conf_text = confidence_labels.get(result.get("confidence", "medium"), ("🟡", ""))
-            st.success(f"**{result['name']}** - {result.get('serving_description', '')}")
-            if result.get("confidence") != "high":
-                st.caption(f"{conf_icon} {conf_text} - ההערכה עשויה להשתנות בהתאם לגודל המנה בפועל")
+            st.info(f"🤖 זוהה: **{result['name']}** {conf_icon} - האם הזיהוי נכון? תוכל לתקן למטה לפני הוספה ליומן.")
 
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                st.markdown(f"""<div class="nutrition-box">
-                    <div class="nutrition-label">🔥 קלוריות</div>
-                    <div class="nutrition-value">{result['calories']}</div>
-                    <div class="nutrition-unit">kcal</div></div>""", unsafe_allow_html=True)
-            with c2:
-                st.markdown(f"""<div class="nutrition-box">
-                    <div class="nutrition-label">🍞 פחמימות</div>
-                    <div class="nutrition-value">{result['carbs']}</div>
-                    <div class="nutrition-unit">גרם</div></div>""", unsafe_allow_html=True)
-            with c3:
-                st.markdown(f"""<div class="nutrition-box">
-                    <div class="nutrition-label">🥑 שומן</div>
-                    <div class="nutrition-value">{result['fat']}</div>
-                    <div class="nutrition-unit">גרם</div></div>""", unsafe_allow_html=True)
-            with c4:
-                st.markdown(f"""<div class="nutrition-box">
-                    <div class="nutrition-label">💪 חלבון</div>
-                    <div class="nutrition-value">{result['protein']}</div>
-                    <div class="nutrition-unit">גרם</div></div>""", unsafe_allow_html=True)
+            with st.form("confirm_form"):
+                st.markdown("#### ✏️ אשר או תקן את הפרטים")
+                name_input = st.text_input("שם המזון", value=result["name"])
+                c1, c2, c3, c4 = st.columns(4)
+                cal_input = c1.number_input("🔥 קלוריות", value=int(result["calories"]), min_value=0, step=1)
+                carb_input = c2.number_input("🍞 פחמימות (g)", value=int(result["carbs"]), min_value=0, step=1)
+                fat_input = c3.number_input("🥑 שומן (g)", value=int(result["fat"]), min_value=0, step=1)
+                prot_input = c4.number_input("💪 חלבון (g)", value=int(result["protein"]), min_value=0, step=1)
 
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("➕ הוסף ליומן האכילה", type="secondary"):
+                col_confirm, col_cancel = st.columns(2)
+                confirmed = col_confirm.form_submit_button("✅ אשר והוסף ליומן", type="primary", use_container_width=True)
+                cancelled = col_cancel.form_submit_button("❌ בטל", use_container_width=True)
+
+            if confirmed:
                 now = datetime.now()
                 item = {
                     "date": now.strftime("%Y-%m-%d"),
                     "time": now.strftime("%H:%M"),
-                    "name": result["name"],
-                    "calories": result["calories"],
-                    "carbs": result["carbs"],
-                    "fat": result["fat"],
-                    "protein": result["protein"],
+                    "name": name_input,
+                    "calories": cal_input,
+                    "carbs": carb_input,
+                    "fat": fat_input,
+                    "protein": prot_input,
                 }
-                entry_id = add_food_entry(st.session_state.user_email, item)
-                item["id"] = entry_id
-                st.session_state.log.append(item)
+                try:
+                    entry_id = add_food_entry(st.session_state.user_email, item)
+                    item["id"] = entry_id
+                    st.session_state.log.append(item)
+                    st.session_state.analysis_result = None
+                    st.session_state.last_uploaded_name = None
+                    st.success("✅ נוסף ליומן!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"שגיאה בשמירה: {e}")
+
+            if cancelled:
                 st.session_state.analysis_result = None
                 st.session_state.last_uploaded_name = None
-                st.success("נוסף ליומן!")
                 st.rerun()
 
     st.markdown("---")
