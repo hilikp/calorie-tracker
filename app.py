@@ -259,13 +259,15 @@ if st.session_state.user_email is None:
     st.markdown("<br>", unsafe_allow_html=True)
 
     if st.button("✅ התחבר", type="primary"):
-        try:
-            users = json.loads(st.secrets["USERS"])
-        except Exception:
-            users = {}
+        allowed = {}
+        for i in range(1, 6):
+            e = st.secrets.get(f"USER{i}_EMAIL", "")
+            p = st.secrets.get(f"USER{i}_PASSWORD", "")
+            if e:
+                allowed[e.strip()] = p.strip()
 
-        if users.get(email_input) == password_input and password_input:
-            st.session_state.user_email = email_input
+        if allowed.get(email_input.strip()) == password_input.strip() and password_input:
+            st.session_state.user_email = email_input.strip()
             settings = load_settings(email_input)
             if settings:
                 st.session_state.daily_goal = settings["daily_goal"]
