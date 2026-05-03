@@ -75,7 +75,6 @@ for key, default in [
 
 
 # --- Google Sheets ---
-@st.cache_resource
 def get_gsheet():
     creds_info = json.loads(st.secrets["GSHEET_CREDENTIALS"])
     creds = Credentials.from_service_account_info(
