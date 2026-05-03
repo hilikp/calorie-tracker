@@ -361,11 +361,13 @@ if st.session_state.username is None:
     st.title("🍽️ מזהה קלוריות חכם")
     st.markdown("### התחברות")
     st.markdown("---")
-    username_input = st.text_input("👤 שם משתמש", placeholder="הכנס שם משתמש", key="login_user")
-    password_input = st.text_input("🔑 סיסמה", type="password", placeholder="הכנס סיסמה", key="login_pass")
-    st.markdown("<br>", unsafe_allow_html=True)
+    with st.form("login_form"):
+        username_input = st.text_input("👤 שם משתמש", placeholder="הכנס שם משתמש", key="login_user")
+        password_input = st.text_input("🔑 סיסמה", type="password", placeholder="הכנס סיסמה", key="login_pass")
+        st.markdown("<br>", unsafe_allow_html=True)
+        submitted = st.form_submit_button("✅ התחבר", type="primary", use_container_width=True)
 
-    if st.button("✅ התחבר", type="primary"):
+    if submitted:
         try:
             valid_user = st.secrets["USER1_NAME"].strip()
             valid_pass = st.secrets["USER1_PASSWORD"].strip()
