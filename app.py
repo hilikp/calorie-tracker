@@ -141,7 +141,11 @@ def load_today_log(username: str):
 
 def add_food_entry(username: str, item: dict) -> str:
     entry_id = f"{username}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
-    ws = get_gsheet().worksheet("food_log")
+    try:
+        wb = get_gsheet()
+        ws = wb.worksheet("food_log")
+    except Exception as e:
+        raise Exception(f"Cannot open worksheet 'food_log': {e}. Available: {[s.title for s in get_gsheet().worksheets()]}")
     ws.append_row([
         entry_id, username, item["date"], item["time"],
         item["name"], item["calories"], item["carbs"],
