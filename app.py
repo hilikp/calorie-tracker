@@ -76,7 +76,13 @@ for key, default in [
 
 # --- Google Sheets ---
 def get_gsheet():
-    creds_info = json.loads(st.secrets["GSHEET_CREDENTIALS"])
+    raw = st.secrets["GSHEET_CREDENTIALS"]
+    try:
+        creds_info = json.loads(raw)
+    except Exception as parse_err:
+        raise Exception(f"GSHEET_CREDENTIALS is not valid JSON: {parse_err}. First 100 chars: {str(raw)[:100]!r}")
+    sa_email = creds_info.get("client_email", "NOT FOUND")
+    sheet_id = st.secrets["GSHEET_ID"]
     creds = Credentials.from_service_account_info(
         creds_info,
         scopes=[
@@ -85,7 +91,10 @@ def get_gsheet():
         ]
     )
     client = gspread.authorize(creds)
-    return client.open_by_key(st.secrets["GSHEET_ID"])
+    try:
+        return client.open_by_key(sheet_id)
+    except Exception as e:
+        raise Exception(f"open_by_key failed for sheet_id={sheet_id!r} using service account={sa_email!r}: {e}")
 
 
 def load_settings(username: str):
